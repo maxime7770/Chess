@@ -68,7 +68,6 @@ def main():
 
                 if len(player_clicks) == 2: # it is the second click of the player
                     move = chess_engine.Move(player_clicks[0], player_clicks[1], game_state.board)
-                    print(move.get_chess_notation())
                     if move in valid_moves: # the move is valid
                         game_state.make_move(move)
                         move_made = True
@@ -83,6 +82,7 @@ def main():
                     move_made = True
             
         if move_made:
+            print(move.get_chess_notation())
             valid_moves = game_state.get_valid_moves()
             move_made = False
 
