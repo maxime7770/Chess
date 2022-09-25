@@ -46,6 +46,11 @@ class GameState:
         if move.piece_moved == 'bK':
             self.black_king_location = (move.end_row, move.end_col)
 
+        if move.is_pawn_promotion:
+            p = input('What piece?')
+            self.board[move.end_row][move.end_col] = move.piece_moved[0] + p
+
+
 
     def undo_move(self):
         ''' undo the last move made 
@@ -394,9 +399,9 @@ class GameState:
     
 class Move:
 
-    ranks_ro_row = {'1': 7, '2': 6, '3': 5, '4': 4, 
+    ranks_to_row = {'1': 7, '2': 6, '3': 5, '4': 4, 
                     '5': 3, '6': 2, '7': 1, '8': 0}
-    row_to_ranks = {v: k for k, v in ranks_ro_row.items()}
+    row_to_ranks = {v: k for k, v in ranks_to_row.items()}
     files_to_cols = {'a': 0, 'b': 1, 'c': 2, 'd': 3, 
                     'e': 4, 'f': 5, 'g': 6, 'h': 7}
     cols_to_files = {v: k for k, v in files_to_cols.items()}
@@ -411,7 +416,10 @@ class Move:
         self.piece_moved = board[self.start_row][self.start_col]
         self.piece_captured = board[self.end_row][self.end_col]
         self.moveID = self.start_row * 1000 + self.start_col * 100 + self.end_row * 10 + self.end_col    # unique identifier
-    
+        self.is_pawn_promotion = False
+        if (self.piece_moved == 'wp' and self.end_row == 0) or (self.piece_moved == 'bp' and self.end_row == 7):
+            self.is_pawn_promotion = True
+
     def __eq__(self, other):
         ''' overriding the equals method
         '''

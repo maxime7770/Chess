@@ -68,12 +68,13 @@ def main():
 
                 if len(player_clicks) == 2: # it is the second click of the player
                     move = chess_engine.Move(player_clicks[0], player_clicks[1], game_state.board)
-                    if move in valid_moves: # the move is valid
-                        game_state.make_move(move)
-                        move_made = True
-                        square_selected = ()   # reset
-                        player_clicks = []
-                    else:
+                    for i in range(len(valid_moves)):   
+                        if move == valid_moves[i]: # the move is valid
+                            game_state.make_move(valid_moves[i])
+                            move_made = True
+                            square_selected = ()   # reset
+                            player_clicks = []
+                    if not move_made:
                         player_clicks = [square_selected]
 
             elif event.type == pygame.KEYDOWN:
