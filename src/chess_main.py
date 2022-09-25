@@ -70,7 +70,7 @@ def main():
                     move = chess_engine.Move(player_clicks[0], player_clicks[1], game_state.board)
                     for i in range(len(valid_moves)):   
                         if move == valid_moves[i]: # the move is valid
-                            game_state.make_move(valid_moves[i])
+                            game_state.make_move(valid_moves[i])  # valid_moves[i] and not make_move otherwise some bugs
                             move_made = True
                             square_selected = ()   # reset
                             player_clicks = []
