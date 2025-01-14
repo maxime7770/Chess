@@ -50,6 +50,8 @@ class GameState:
 
         if move.is_pawn_promotion:
             promoted = input('Promote to Q, B, R, or N: ')
+            while promoted not in ['Q', 'B', 'R', 'N']:
+                promoted = input('Invalid input. Promote to Q, B, R, or N: ')
             self.board[move.end_row][move.end_col] = move.piece_moved[0] + promoted
 
         if move.is_enpassant:
@@ -60,7 +62,6 @@ class GameState:
         else:
             self.enpassant_possible = ()
             
-
 
 
     def undo_move(self):

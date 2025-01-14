@@ -1,0 +1,4 @@
+`brew install python-tk`  # before building python env
+numpy
+pygame
+pygbag

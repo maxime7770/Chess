@@ -3,12 +3,13 @@ Main driver file: handle user input and display current GameState
 """
 
 from re import A
-from tkinter.tix import MAX
+# from tkinter.tix import MAX
 
 from numpy import square
 import pygame
 from pygame.locals import *
 from src import chess_engine
+from src.minmax_agent import get_best_move
 import os
 
 
@@ -18,7 +19,7 @@ pygame.init()
 WIDTH = HEIGHT = 512
 DIMENSION = 8
 SQ_SIZE = HEIGHT // DIMENSION
-MAX_FPS = 15
+MAX_FPS = 30
 IMAGES = {}
 
 
@@ -47,8 +48,15 @@ def main():
     running = True
     square_selected = () # keep track of the last click of the user (row, col)
     player_clicks = [] # keep track of player clicks (two tuples)
+    player_one = True # if a human is playing white
+    player_two = False # if a human is playing black
 
     while running:
+        human_turn = (game_state.white_to_move and player_one) or (not game_state.white_to_move and player_two)
+        if not human_turn:
+            ai_move = get_best_move(game_state, depth=6)
+            game_state.make_move(ai_move)
+            move_made = True
 
         for event in pygame.event.get():
 
