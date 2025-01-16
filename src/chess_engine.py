@@ -6,6 +6,7 @@ Determining the valid moves at the current state. (move log)
 
 from asyncio.format_helpers import _format_callback_source
 from string import whitespace
+import numpy as np
 
 
 class GameState:
@@ -33,6 +34,8 @@ class GameState:
         self.pins = [] # list of tuples (row, col, x, y) of pieces that are pinned and direction of pin
         self.checks = [] # list of tuples (row, col) of pieces that are in check and direction of check
         self.enpassant_possible = ()   # coordinate of the possible square
+        self.checkmate = False
+        self.stalemate = False
 
     
     def make_move(self, move):
@@ -49,9 +52,10 @@ class GameState:
             self.black_king_location = (move.end_row, move.end_col)
 
         if move.is_pawn_promotion:
-            promoted = input('Promote to Q, B, R, or N: ')
-            while promoted not in ['Q', 'B', 'R', 'N']:
-                promoted = input('Invalid input. Promote to Q, B, R, or N: ')
+            # promoted = input('Promote to Q, B, R, or N: ')
+            # while promoted not in ['Q', 'B', 'R', 'N']:
+            #     promoted = input('Invalid input. Promote to Q, B, R, or N: ')
+            promoted = 'Q'
             self.board[move.end_row][move.end_col] = move.piece_moved[0] + promoted
 
         if move.is_enpassant:
@@ -61,7 +65,82 @@ class GameState:
             self.enpassant_possible = ((move.start_row + move.end_row) // 2, move.start_col)
         else:
             self.enpassant_possible = ()
-            
+
+    def create_initial_board(self):
+        """Initialize the chess board to the starting position."""
+        return [
+            ['bR', 'bN', 'bB', 'bQ', 'bK', 'bB', 'bN', 'bR'],
+            ['bp', 'bp', 'bp', 'bp', 'bp', 'bp', 'bp', 'bp'],
+            ['--', '--', '--', '--', '--', '--', '--', '--'],
+            ['--', '--', '--', '--', '--', '--', '--', '--'],
+            ['--', '--', '--', '--', '--', '--', '--', '--'],
+            ['--', '--', '--', '--', '--', '--', '--', '--'],
+            ['wp', 'wp', 'wp', 'wp', 'wp', 'wp', 'wp', 'wp'],
+            ['wR', 'wN', 'wB', 'wQ', 'wK', 'wB', 'wN', 'wR']
+        ]
+    
+    def reset(self):
+        """Reset the game to the initial state."""
+        self.board = self.create_initial_board()
+        self.move_log = []
+        self.white_to_move = True
+        self.white_king_location = (7, 4)
+        self.black_king_location = (0, 4)
+        self.enpassant_possible = ()
+
+    def encode_move(self, move):
+        """
+        Encodes a Move object into a unique integer in [0..4095],
+        where start and end squares each map to 0..63.
+        """
+        start_idx = move.start_row * 8 + move.start_col  # [0..63]
+        end_idx   = move.end_row * 8 + move.end_col      # [0..63]
+        return start_idx * 64 + end_idx  # [0..4095]
+
+    def decode_move(self, action_index):
+        """
+        Decodes an action index in [0..4095] back into a Move object.
+        """
+        start_idx = action_index // 64   # [0..63]
+        end_idx   = action_index % 64    # [0..63]
+        start_row, start_col = divmod(start_idx, 8)
+        end_row,   end_col   = divmod(end_idx, 8)
+        return Move((start_row, start_col), (end_row, end_col), self.board)
+                
+    def get_state_representation(self):
+        ''' Converts the board into a flattened 8x8 array.
+        Each piece type is represented by a unique integer.
+        Empty squares are 0.
+        '''
+        piece_to_int = {
+            '--': 0,
+            'wp': 1, 'wN': 2, 'wB': 3, 'wR': 4, 'wQ': 5, 'wK': 6,
+            'bp': -1, 'bN': -2, 'bB': -3, 'bR': -4, 'bQ': -5, 'bK': -6
+        }
+        state = []
+        for row in self.board:
+            for piece in row:
+                state.append(piece_to_int.get(piece, 0))
+        return np.array(state, dtype=np.float32)
+    
+
+    def get_valid_move_indices(self):
+        ''' Returns a list of action indices corresponding to all valid moves.
+        Each action index uniquely identifies a move.
+        '''
+        valid_moves = self.get_valid_moves()
+        move_indices = []
+        for move in valid_moves:
+            index = self.encode_move(move)  # Implement this encoding
+            move_indices.append(index)
+        return move_indices
+
+    def get_move_from_action(self, action_index):
+        """
+        Converts an action index back to a Move object.
+        """
+        move = self.decode_move(action_index)  # Implement this decoding
+        return move
 
 
     def undo_move(self):
@@ -169,7 +248,42 @@ class GameState:
                     checks.append((end_row, end_col, move[0], move[1]))
         return in_check, pins, checks
     
-        
+
+    def is_checkmate(self):
+        """
+        Determines if the current state is a checkmate.
+        Returns True if the current player's king is in check and there are no valid moves.
+        """
+        if self.white_to_move:
+            return self.square_under_attack(self.white_king_location[0], self.white_king_location[1])
+        else:
+            return self.square_under_attack(self.black_king_location[0], self.black_king_location[1])
+    
+    def is_stalemate(self):
+        """
+        Determines if the current state is a stalemate.
+        Returns True if the current player is not in check but has no valid moves.
+        """
+        self.in_check, _, _ = self.pins_and_checks()  # Check if the current player is in check
+        if not self.in_check:
+            valid_moves = self.get_valid_moves()
+            if len(valid_moves) == 0:  # No valid moves and not in check
+                return True
+        return 
+    
+
+    def square_under_attack(self, row, col):
+        """
+        Determine if enemy can attack the square row col
+        """
+        self.white_to_move = not self.white_to_move  # switch to opponent's point of view
+        opponents_moves = self.get_all_possible_moves()
+        self.white_to_move = not self.white_to_move
+        for move in opponents_moves:
+            if move.end_row == row and move.end_col == col:  # square is under attack
+                return True
+        return False
+            
                          
     
     def get_all_possible_moves(self):

@@ -31,56 +31,56 @@ def minimax(game_state, depth, alpha, beta, maximizing_player):
     if maximizing_player:
         max_eval = -math.inf
         for move in valid_moves:
-            if move.is_pawn_promotion:
-                for promotion_piece in ['Q', 'R', 'B', 'N']:
-                    move.promote_to = promotion_piece
-                    move.is_pawn_promotion = False
-                    game_state.make_move(move)
-                    eval_score, _ = minimax(game_state, depth - 1, alpha, beta, False)
-                    game_state.undo_move()
-                    if eval_score > max_eval:
-                        max_eval = eval_score
-                        best_move = move
-                    alpha = max(alpha, eval_score)
-                    if beta <= alpha:
-                        break
-            else:
-                game_state.make_move(move)
-                eval_score, _ = minimax(game_state, depth - 1, alpha, beta, False)
-                game_state.undo_move()
-                if eval_score > max_eval:
-                    max_eval = eval_score
-                    best_move = move
-                alpha = max(alpha, eval_score)
-                if beta <= alpha:
-                    break
+            # if move.is_pawn_promotion:
+            #     for promotion_piece in ['Q', 'R', 'B', 'N']:
+            #         move.promote_to = promotion_piece
+            #         move.is_pawn_promotion = False
+            #         game_state.make_move(move)
+            #         eval_score, _ = minimax(game_state, depth - 1, alpha, beta, False)
+            #         game_state.undo_move()
+            #         if eval_score > max_eval:
+            #             max_eval = eval_score
+            #             best_move = move
+            #         alpha = max(alpha, eval_score)
+            #         if beta <= alpha:
+            #             break
+            # else:
+            game_state.make_move(move)
+            eval_score, _ = minimax(game_state, depth - 1, alpha, beta, False)
+            game_state.undo_move()
+            if eval_score > max_eval:
+                max_eval = eval_score
+                best_move = move
+            alpha = max(alpha, eval_score)
+            if beta <= alpha:
+                break
         return max_eval, best_move
     else:
         min_eval = math.inf
         for move in valid_moves:
-            if move.is_pawn_promotion:
-                for promotion_piece in ['Q', 'R', 'B', 'N']:
-                    move.promote_to = promotion_piece
-                    move.is_pawn_promotion = False
-                    game_state.make_move(move)
-                    eval_score, _ = minimax(game_state, depth - 1, alpha, beta, True)
-                    game_state.undo_move()
-                    if eval_score < min_eval:
-                        min_eval = eval_score
-                        best_move = move
-                    beta = min(beta, eval_score)
-                    if beta <= alpha:
-                        break
-            else:
-                game_state.make_move(move)
-                eval_score, _ = minimax(game_state, depth - 1, alpha, beta, True)
-                game_state.undo_move()
-                if eval_score < min_eval:
-                    min_eval = eval_score
-                    best_move = move
-                beta = min(beta, eval_score)
-                if beta <= alpha:
-                    break
+            # if move.is_pawn_promotion:
+            #     for promotion_piece in ['Q', 'R', 'B', 'N']:
+            #         move.promote_to = promotion_piece
+            #         move.is_pawn_promotion = False
+            #         game_state.make_move(move)
+            #         eval_score, _ = minimax(game_state, depth - 1, alpha, beta, True)
+            #         game_state.undo_move()
+            #         if eval_score < min_eval:
+            #             min_eval = eval_score
+            #             best_move = move
+            #         beta = min(beta, eval_score)
+            #         if beta <= alpha:
+            #             break
+            # else:
+            game_state.make_move(move)
+            eval_score, _ = minimax(game_state, depth - 1, alpha, beta, True)
+            game_state.undo_move()
+            if eval_score < min_eval:
+                min_eval = eval_score
+                best_move = move
+            beta = min(beta, eval_score)
+            if beta <= alpha:
+                break
         return min_eval, best_move
 
 def get_best_move(game_state, depth=3):

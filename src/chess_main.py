@@ -9,9 +9,10 @@ from numpy import square
 import pygame
 from pygame.locals import *
 from src import chess_engine
-from src.minmax_agent import get_best_move
+from src.minmax_agent import get_best_move as get_best_move_minmax
+from src.ql_agent import get_best_move as get_best_move_ql, DQNAgent
 import os
-
+import torch
 
 pygame.init()
 
@@ -22,6 +23,10 @@ SQ_SIZE = HEIGHT // DIMENSION
 MAX_FPS = 30
 IMAGES = {}
 
+
+agent = DQNAgent()
+agent.policy_net.load_state_dict(torch.load("dqn_policy.pth"))
+agent.policy_net.eval()
 
 def load_images():
     ''' fill IMAGES to easily access an image with IMAGES['wp'] 
@@ -54,7 +59,7 @@ def main():
     while running:
         human_turn = (game_state.white_to_move and player_one) or (not game_state.white_to_move and player_two)
         if not human_turn:
-            ai_move = get_best_move(game_state, depth=6)
+            ai_move = get_best_move_ql(game_state, agent)
             game_state.make_move(ai_move)
             move_made = True
 
