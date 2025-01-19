@@ -8,6 +8,15 @@ import torch.optim as optim
 from src.chess_engine import GameState, Move
 from src.minmax_agent import get_best_move as get_best_move_minmax
 
+
+def _print_board_lines_debug(board):
+    """
+    Helper function to print the board state for debugging.
+    """
+    for row in board:
+        print(" ".join(row))
+    print()
+
 # ========== 1) Neural Network Definition ==========
 
 class DQNNetwork(nn.Module):
@@ -27,6 +36,78 @@ class DQNNetwork(nn.Module):
         
     def forward(self, x):
         return self.net(x)
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class ResidualBlock(nn.Module):
+    def __init__(self, hidden_dim, dropout=0.2):
+        super(ResidualBlock, self).__init__()
+        self.fc1 = nn.Linear(hidden_dim, hidden_dim)
+        self.norm1 = nn.LayerNorm(hidden_dim)  # or InstanceNorm1d
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.norm2 = nn.LayerNorm(hidden_dim)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+        identity = x
+
+        out = self.fc1(x)
+        out = self.norm1(out)
+        out = F.relu(out)
+        out = self.dropout(out)
+
+        out = self.fc2(out)
+        out = self.norm2(out)
+
+        out += identity
+        out = F.relu(out)
+        return out
+
+class FinalMLPNetwork(nn.Module):
+    """
+    A final MLP-based DQN network for 64-element board input -> 4096 action Q-values.
+    Uses multiple residual blocks, batch norm, and dropout.
+    """
+    def __init__(
+        self,
+        input_dim=64,
+        hidden_dim=256,
+        output_dim=64*64,
+        num_res_blocks=2,
+        dropout=0.2
+    ):
+        super(FinalMLPNetwork, self).__init__()
+
+        # Initial projection from 64 -> hidden_dim
+        self.input_fc = nn.Linear(input_dim, hidden_dim)
+
+        # A sequence of residual blocks
+        self.res_blocks = nn.ModuleList([
+            ResidualBlock(hidden_dim, dropout=dropout) for _ in range(num_res_blocks)
+        ])
+
+        # Final output layer to produce Q-values
+        self.output_fc = nn.Linear(hidden_dim, output_dim)
+
+    def forward(self, x):
+        """
+        x shape: (batch_size, 64)
+        Returns: Q-values of shape (batch_size, 4096)
+        """
+        # Initial linear + ReLU
+        x = self.input_fc(x)
+        x = F.relu(x)
+
+        # Pass through the residual blocks
+        for block in self.res_blocks:
+            x = block(x)
+
+        # Final linear -> Q-values
+        x = self.output_fc(x)
+        return x
+    
 
 
 # ========== 2) Replay Memory ==========
@@ -75,7 +156,7 @@ class DQNAgent:
         epsilon_end=0.1,
         epsilon_decay=1_000_000, 
         batch_size=64, 
-        target_update_freq=1000, 
+        target_update_freq=100, 
         replay_capacity=50_000,
     ):
         # Basic parameters
@@ -95,8 +176,10 @@ class DQNAgent:
         self.train_steps = 0
 
         # DQN networks
-        self.policy_net = DQNNetwork(state_size, hidden_dim, action_size)
-        self.target_net = DQNNetwork(state_size, hidden_dim, action_size)
+        # self.policy_net = DQNNetwork(state_size, hidden_dim, action_size)
+        # self.target_net = DQNNetwork(state_size, hidden_dim, action_size)
+        self.policy_net = FinalMLPNetwork(input_dim=state_size, hidden_dim=hidden_dim, output_dim=action_size)
+        self.target_net = FinalMLPNetwork(input_dim=state_size, hidden_dim=hidden_dim, output_dim=action_size)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
 
@@ -216,20 +299,12 @@ class DQNAgent:
 
         # --- 1) Terminal rewards ---
         if game_state.is_checkmate():
-            # By default, is_checkmate() returns True if the *current side to move* is in check with no moves.
-            # If the agent is controlling the side that just *moved*, we need to figure out who actually got checkmated.
-            #
-            # If 'white_to_move' is True after the move, that means it's White's turn => White is the one facing checkmate => -1 for White.
-            # If your agent is always White, that means your agent lost => -1
-            # If your agent is always Black, that means your agent *won* => +1.
-            #
-            # For self-play, you can track which side delivered mate. Let's assume your code sees "the side about to move is in checkmate => that side lost."
             if game_state.white_to_move:
-                # White is checkmated => if your agent was White, that's -1 for the agent.
-                return -1
-            else:
-                # Black is checkmated => if your agent was White, that's +1 for the agent.
+                # White to move => White is checkmated => Black wins => +1 for Black
                 return +1
+            else:
+                # Black to move => Black is checkmated => Black loses => -1
+                return -1
 
         if game_state.is_stalemate():
             # Stalemate => 0 reward
@@ -261,20 +336,11 @@ class DQNAgent:
     def get_material_delta(self, old_board, new_board):
         """
         Compare material in old_board vs. new_board from the agent's perspective.
-        For instance, +9 if we captured an enemy queen, -5 if we lost a rook, etc.
-        
-        If you're controlling white only, 'agent_color'='w'; 
-        or if black, 'agent_color'='b'. For self-play, you might just compute a 
-        net difference for the side that moved last. 
+        Now we assume the agent is BLACK, so capturing White's piece is positive, 
+        losing Black's piece is negative.
         """
-        # Example piece values:
         piece_values = {'p': 1, 'N': 3, 'B': 3, 'R': 5, 'Q': 9}
         
-        # In a more sophisticated approach, you'd track which side is which 
-        # (white or black). For brevity, assume the agent is always "white" 
-        # so capturing black's piece = positive, losing white's piece = negative.
-
-        # Count material in old_board and new_board.
         old_score = 0
         new_score = 0
 
@@ -283,20 +349,22 @@ class DQNAgent:
                 piece_old = old_board[r][c]
                 piece_new = new_board[r][c]
                 
-                # If there's a piece (e.g. 'wQ', 'bN', etc.)
+                # For the "old" board piece
                 if piece_old != '--':
-                    sign = 1 if piece_old[0] == 'w' else -1
+                    # If the piece is Black => sign=+1; if White => sign=-1
+                    sign = 1 if piece_old[0] == 'b' else -1
                     val  = piece_values.get(piece_old[1], 0)
                     old_score += sign * val
                 
+                # For the "new" board piece
                 if piece_new != '--':
-                    sign = 1 if piece_new[0] == 'w' else -1
+                    sign = 1 if piece_new[0] == 'b' else -1
                     val  = piece_values.get(piece_new[1], 0)
                     new_score += sign * val
 
-        # From white's perspective, if old_score < new_score => we gained material => positive reward
-        # If old_score > new_score => we lost material => negative reward
-        return (new_score - old_score) * 0.05  # scale factor if you want smaller increments
+        # From BLACK's perspective, if new_score > old_score => black gained material => positive
+        # Scale by 0.05 (or any factor you like)
+        return (new_score - old_score) * 0.05
 
     def opponent_in_check(self, game_state):
         """
@@ -315,7 +383,7 @@ class DQNAgent:
             return game_state.in_check
         return False
 
-    def train_one_game(self, max_moves=200):
+    def train_one_game(self, max_moves=200, use_random=True, minmax_depth=1):
         """
         Train with the agent controlling White only.
         Black's moves are random in this example.
@@ -330,7 +398,7 @@ class DQNAgent:
         while not done and move_count < max_moves:
             move_count += 1
             # ----- WHITE (Agent) Turn -----
-            if game_state.white_to_move:
+            if not game_state.white_to_move:
                 # Agent chooses an action
                 state_rep = game_state.get_state_representation()
                 valid_actions = game_state.get_valid_move_indices()
@@ -381,7 +449,10 @@ class DQNAgent:
                     break
 
                 # opponent = minmax_agent
-                black_action = get_best_move_minmax(game_state, depth=2)
+                if use_random:
+                    black_action = game_state.get_move_from_action(random.choice(valid_actions))
+                else:
+                    black_action = get_best_move_minmax(game_state, depth=minmax_depth)
                 #move_obj = game_state.get_move_from_action(black_action)
                 game_state.make_move(black_action)
 
@@ -390,12 +461,18 @@ class DQNAgent:
 
         return reward
 
-    def train(self, num_episodes=1000):
+    def train(self, num_episodes=1000, random_fraction=0.2, minmax_depths_increment=500):
         """
         Train for a number of episodes (self-play).
         """
+        num_random = int(random_fraction * num_episodes)
         for episode in range(num_episodes):
-            ep_reward = self.train_one_game()
+            if episode < num_random:
+                # Random play for the first few episodes
+                ep_reward = self.train_one_game(use_random=True)
+            else:
+                minmax_depth = min(1 + ((episode - num_random) // minmax_depths_increment), 6)
+                ep_reward = self.train_one_game(minmax_depth=minmax_depth, use_random=False)
             if (episode + 1) % 10 == 0:
                 print(f"[Episode {episode+1}/{num_episodes}] Reward: {ep_reward:.2f}, Epsilon: {self.epsilon:.3f}")
         torch.save(self.policy_net.state_dict(), "dqn_policy.pth")
@@ -403,8 +480,28 @@ class DQNAgent:
 
 # ========== 4) Global Agent + Helper for Chess Main ==========
 
+# Define parameters
+LEARNING_RATE = 2e-5
+GAMMA = 0.99
+EPSILON_START = 1.0
+EPSILON_END = 0.1
+EPSILON_DECAY = 500_000
+BATCH_SIZE = 64
+TARGET_UPDATE_FREQ = 1000
+REPLAY_CAPACITY = 50_000
+
+
 # You can instantiate a global agent here or dynamically in your code
-dqn_agent = DQNAgent()
+dqn_agent = DQNAgent(
+    lr=LEARNING_RATE,
+    gamma=GAMMA,
+    epsilon_start=EPSILON_START,
+    epsilon_end=EPSILON_END,
+    epsilon_decay=EPSILON_DECAY,
+    batch_size=BATCH_SIZE,
+    target_update_freq=TARGET_UPDATE_FREQ,
+    replay_capacity=REPLAY_CAPACITY
+)
 
 def get_best_move(game_state, dqn_agent):
     """
@@ -423,4 +520,4 @@ def get_best_move(game_state, dqn_agent):
 
 # ========== 5) Training the Agent ==========
 if __name__ == "__main__":
-    dqn_agent.train(num_episodes=5000)
+    dqn_agent.train(num_episodes=6000, random_fraction=0.3, minmax_depths_increment=2000)

@@ -249,7 +249,7 @@ class GameState:
         return in_check, pins, checks
     
 
-    def is_checkmate(self):
+    def is_check(self):
         """
         Determines if the current state is a checkmate.
         Returns True if the current player's king is in check and there are no valid moves.
@@ -258,6 +258,13 @@ class GameState:
             return self.square_under_attack(self.white_king_location[0], self.white_king_location[1])
         else:
             return self.square_under_attack(self.black_king_location[0], self.black_king_location[1])
+        
+    def is_checkmate(self):
+        if self.in_check:
+            valid_moves = self.get_valid_moves()
+            if len(valid_moves) == 0:
+                return True
+        return False
     
     def is_stalemate(self):
         """
