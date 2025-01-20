@@ -123,6 +123,37 @@ class GameState:
                 state.append(piece_to_int.get(piece, 0))
         return np.array(state, dtype=np.float32)
     
+    def get_cnn_state_representation(self):
+        """
+        Returns a (channels, 8, 8) numpy array for the current board.
+        
+        Example channel assignment:
+          0: 'wp', 1: 'wN', 2: 'wB', 3: 'wR', 4: 'wQ', 5: 'wK',
+          6: 'bp', 7: 'bN', 8: 'bB', 9: 'bR', 10: 'bQ', 11: 'bK'.
+        Optionally, you can add extra channels (like an 'empty' channel or 
+        a channel for 'side to move'), etc.
+        
+        Make sure your CNN expects the same number of channels.
+        """
+        piece_to_channel = {
+            'wp': 0, 'wN': 1, 'wB': 2, 'wR': 3, 'wQ': 4, 'wK': 5,
+            'bp': 6, 'bN': 7, 'bB': 8, 'bR': 9, 'bQ': 10, 'bK': 11
+        }
+        
+        # We have 12 channels for the 12 piece types. 
+        # shape => (12, 8, 8)
+        board_cnn = np.zeros((12, 8, 8), dtype=np.float32)
+
+        for r in range(8):
+            for c in range(8):
+                piece = self.board[r][c]
+                if piece != '--':  # not empty
+                    if piece in piece_to_channel:
+                        channel_idx = piece_to_channel[piece]
+                        board_cnn[channel_idx, r, c] = 1.0
+
+        return board_cnn
+    
 
     def get_valid_move_indices(self):
         ''' Returns a list of action indices corresponding to all valid moves.
@@ -276,7 +307,7 @@ class GameState:
             valid_moves = self.get_valid_moves()
             if len(valid_moves) == 0:  # No valid moves and not in check
                 return True
-        return 
+        return False
     
 
     def square_under_attack(self, row, col):
@@ -460,41 +491,25 @@ class GameState:
         else:
             ennemy = 'w'
 
-        up, left = r - 1, c - 1
-        if not piece_pinned or pin_direction == (-1, -1) or pin_direction == (1, 1):
-            while up >= 0 and c >= 0 and self.board[up][left] == '--':   # go along the top left diagonal
-                moves.append(Move((r, c), (up, left), self.board))
-                up -= 1
-                left -= 1
-            if up >= 0 and left >= 0 and self.board[up][left][0] == ennemy:    # capture
-                moves.append(Move((r, c), (up, left), self.board))
-        
-        up, right = r - 1, c + 1
-        if not piece_pinned or pin_direction == (-1, 1) or pin_direction == (1, -1):
-            while up >= 0 and right <= 7 and self.board[up][right] == '--':   # go along the top right diagonal
-                moves.append(Move((r, c), (up, right), self.board))
-                up -= 1
-                right += 1
-            if up >= 0 and right <= 7 and self.board[up][right][0] == ennemy:    
-                moves.append(Move((r, c), (up, right), self.board))
-            
-        down, left = r + 1, c - 1
-        if not piece_pinned or pin_direction == (-1, 1) or pin_direction == (1, -1):
-            while down <= 7 and left >= 0 and self.board[down][left] == '--':   # go along the bottom left diagonal
-                moves.append(Move((r, c), (down, left), self.board))
-                down += 1
-                left -= 1
-            if down <= 7 and left >= 0 and self.board[down][left][0] == ennemy:    
-                moves.append(Move((r, c), (down, left), self.board))
-            
-        down, right = r + 1, c + 1
-        if not piece_pinned or pin_direction == (-1, 0) or pin_direction == (1, 0):
-            while down <= 7 and right <= 7 and self.board[down][right] == '--':   # go along the bottom right diagonal
-                moves.append(Move((r, c), (down, right), self.board))
-                down += 1
-                right += 1
-            if down <= 7 and right <= 7 and self.board[down][right][0] == ennemy:    
-                moves.append(Move((r, c), (down, right), self.board))
+        directions = ((-1, -1), (-1, 1), (1, 1), (1, -1))  # diagonals: up/left up/right down/right down/left
+        enemy_color = "b" if self.white_to_move else "w"
+        for direction in directions:
+            for i in range(1, 8):
+                end_row = r + direction[0] * i
+                end_col = c + direction[1] * i
+                if 0 <= end_row <= 7 and 0 <= end_col <= 7:  # check if the move is on board
+                    if not piece_pinned or pin_direction == direction or pin_direction == (
+                            -direction[0], -direction[1]):
+                        end_piece = self.board[end_row][end_col]
+                        if end_piece == "--":  # empty space is valid
+                            moves.append(Move((r, c), (end_row, end_col), self.board))
+                        elif end_piece[0] == enemy_color:  # capture enemy piece
+                            moves.append(Move((r, c), (end_row, end_col), self.board))
+                            break
+                        else:  # friendly piece
+                            break
+                else:  # off board
+                    break
         
 
 

@@ -17,6 +17,13 @@ def _print_board_lines_debug(board):
         print(" ".join(row))
     print()
 
+
+def _king_missing(board):
+    for row in board:
+        if 'bK' in row:
+            return False
+    return True
+
 # ========== 1) Neural Network Definition ==========
 
 class DQNNetwork(nn.Module):
@@ -108,7 +115,31 @@ class FinalMLPNetwork(nn.Module):
         x = self.output_fc(x)
         return x
     
+class SimpleConv2D(nn.Module):
+    def __init__(self, in_channels=12, hidden_dim=256, output_dim=64*64):
+        super(SimpleConv2D, self).__init__()
 
+        self.conv_layers = nn.Sequential(
+            nn.Conv2d(in_channels, 32, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.ReLU()
+        )
+        # Flatten => 64*8*8 = 4096
+        self.fc = nn.Sequential(
+            nn.Linear(64*8*8, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, output_dim)
+        )
+
+    def forward(self, x):
+        """
+        x shape => (batch_size, 12, 8, 8)
+        """
+        out = self.conv_layers(x)   # => (batch_size, 64, 8, 8)
+        out = out.view(out.size(0), -1)  # flatten => (batch_size, 4096)
+        out = self.fc(out)  # => (batch_size, 4096)
+        return out
 
 # ========== 2) Replay Memory ==========
 
@@ -178,8 +209,10 @@ class DQNAgent:
         # DQN networks
         # self.policy_net = DQNNetwork(state_size, hidden_dim, action_size)
         # self.target_net = DQNNetwork(state_size, hidden_dim, action_size)
-        self.policy_net = FinalMLPNetwork(input_dim=state_size, hidden_dim=hidden_dim, output_dim=action_size)
-        self.target_net = FinalMLPNetwork(input_dim=state_size, hidden_dim=hidden_dim, output_dim=action_size)
+        # self.policy_net = FinalMLPNetwork(input_dim=state_size, hidden_dim=hidden_dim, output_dim=action_size)
+        # self.target_net = FinalMLPNetwork(input_dim=state_size, hidden_dim=hidden_dim, output_dim=action_size)
+        self.policy_net = SimpleConv2D(in_channels=12, hidden_dim=hidden_dim, output_dim=action_size)
+        self.target_net = SimpleConv2D(in_channels=12, hidden_dim=hidden_dim, output_dim=action_size)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
 
@@ -323,13 +356,19 @@ class DQNAgent:
         # A small bonus if the move just delivered a check on the opponent’s king
         # (you could detect that by verifying the opponent's king is in check).
         check_bonus = 0
-        if self.opponent_in_check(game_state):
+        if game_state.is_check() and game_state.white_to_move:
             check_bonus = 0.01
 
         # --- 4) Optional: Small negative reward per move to discourage dragging the game
         # e.g. -0.001
-        move_penalty = -0.001
 
+        move_penalty = -0.001
+        # print("Board")
+        # _print_board_lines_debug(game_state.board)
+        # print("Previous Board")
+        # if previous_board: _print_board_lines_debug(previous_board)
+        # print("Material diff", material_reward)
+        # print('-----------------')
         reward = material_reward + check_bonus + move_penalty
         return reward
 
@@ -363,25 +402,9 @@ class DQNAgent:
                     new_score += sign * val
 
         # From BLACK's perspective, if new_score > old_score => black gained material => positive
-        # Scale by 0.05 (or any factor you like)
+        # Scale by 0.05
         return (new_score - old_score) * 0.05
 
-    def opponent_in_check(self, game_state):
-        """
-        Check if the side that just got the move done on them is in check.
-        If the agent is white and we just made a move, is black's king in check?
-        We'll do a quick approximation:
-        """
-        # If your 'pins_and_checks()' sets self.in_check correctly for the side to move,
-        # you might invert game_state.white_to_move to see if the OPPONENT is in check.
-        opponent_to_move = not game_state.white_to_move
-        if opponent_to_move:
-            # If it's the opponent's turn, 'game_state.in_check' is from the opponent's perspective
-            # but typically 'in_check' is updated in get_valid_moves() or pins_and_checks() for the *current* side.
-            # So you might do something like manually call:
-            _ = game_state.get_valid_moves()  # This updates in_check for 'white_to_move'
-            return game_state.in_check
-        return False
 
     def train_one_game(self, max_moves=200, use_random=True, minmax_depth=1):
         """
@@ -394,37 +417,42 @@ class DQNAgent:
         done = False
         move_count = 0
         previous_board = None
+        total_reward = 0
 
+        game_boards = []
         while not done and move_count < max_moves:
             move_count += 1
-            # ----- WHITE (Agent) Turn -----
             if not game_state.white_to_move:
+                game_boards.append([row[:] for row in game_state.board])
                 # Agent chooses an action
-                state_rep = game_state.get_state_representation()
+                state_rep = game_state.get_cnn_state_representation()
                 valid_actions = game_state.get_valid_move_indices()
 
-                # No moves => checkmate or stalemate for White
                 if not valid_actions:
                     reward = self.get_reward(game_state, previous_board)
+                    # if reward == -1:
+                    #     for b in game_boards:
+                    #         _print_board_lines_debug(b)
                     self.store_transition(state_rep, 0, reward, state_rep, True)
                     done = True
+                    self.update()
                     break
 
                 # Choose action with epsilon-greedy
                 action = self.select_action(state_rep, valid_actions)
-
-                # Make a copy of the board
-                previous_board = [row[:] for row in game_state.board]
+                #previous_board = [row[:] for row in game_state.board]
 
                 # Execute the move
                 move_obj = game_state.get_move_from_action(action)
                 game_state.make_move(move_obj)
+                game_state.white_to_move = not game_state.white_to_move
 
                 # Next state
-                next_state_rep = game_state.get_state_representation()
+                next_state_rep = game_state.get_cnn_state_representation()
 
                 # Shaped reward
                 reward = self.get_reward(game_state, previous_board)
+                total_reward += reward
 
                 # Store transition
                 self.store_transition(state_rep, action, reward, next_state_rep, False)
@@ -433,39 +461,38 @@ class DQNAgent:
                 if game_state.is_checkmate() or game_state.is_stalemate():
                     done = True
                     self.store_transition(state_rep, action, reward, next_state_rep, True)
-                
+                previous_board = [row[:] for row in game_state.board]
                 # Train on mini-batch
                 self.update()
 
-            # ----- BLACK (Opponent) Turn -----
             else:
-                # Example: random move for Black
+                game_boards.append([row[:] for row in game_state.board])
                 valid_actions = game_state.get_valid_move_indices()
                 if not valid_actions:
-                    # Means Black is checkmated or stalemated => from White's perspective, that's a +1 or 0
-                    # But we're not storing transitions for Black moves here, 
-                    # so we just check if the game is done:
                     done = True
+                    reward = self.get_reward(game_state, previous_board)
+                    self.store_transition(state_rep, 0, reward, state_rep, True)
                     break
 
                 # opponent = minmax_agent
                 if use_random:
-                    black_action = game_state.get_move_from_action(random.choice(valid_actions))
+                    opponent_action = game_state.get_move_from_action(random.choice(valid_actions))
                 else:
-                    black_action = get_best_move_minmax(game_state, depth=minmax_depth)
-                #move_obj = game_state.get_move_from_action(black_action)
-                game_state.make_move(black_action)
-
+                    opponent_action = get_best_move_minmax(game_state, depth=minmax_depth)
+                game_state.make_move(opponent_action)
+                game_state.white_to_move = not game_state.white_to_move
+            
             # Flip turn at the end of the loop
-            #game_state.white_to_move = not game_state.white_to_move
-
-        return reward
+            game_state.white_to_move = not game_state.white_to_move
+        return total_reward
 
     def train(self, num_episodes=1000, random_fraction=0.2, minmax_depths_increment=500):
         """
         Train for a number of episodes (self-play).
         """
         num_random = int(random_fraction * num_episodes)
+        avg_rewards_episodes = 0
+        all_rewards = []
         for episode in range(num_episodes):
             if episode < num_random:
                 # Random play for the first few episodes
@@ -473,8 +500,17 @@ class DQNAgent:
             else:
                 minmax_depth = min(1 + ((episode - num_random) // minmax_depths_increment), 6)
                 ep_reward = self.train_one_game(minmax_depth=minmax_depth, use_random=False)
+            avg_rewards_episodes += ep_reward
+            all_rewards.append(ep_reward)
             if (episode + 1) % 10 == 0:
-                print(f"[Episode {episode+1}/{num_episodes}] Reward: {ep_reward:.2f}, Epsilon: {self.epsilon:.3f}")
+                print(f"[Episode {episode+1}/{num_episodes}] Average reward: {avg_rewards_episodes/10:.2f}, Epsilon: {self.epsilon:.3f}")
+                avg_rewards_episodes = 0
+        # plot rewards
+        # import matplotlib.pyplot as plt
+        # plt.plot(all_rewards)
+        # plt.xlabel("Episode")
+        # plt.ylabel("Reward")
+        # plt.title("Training Rewards")
         torch.save(self.policy_net.state_dict(), "dqn_policy.pth")
         print("Model saved to dqn_policy.pth")
 
@@ -508,7 +544,7 @@ def get_best_move(game_state, dqn_agent):
     A helper function for your main chess program to get the next move from the DQNAgent.
     This is analogous to your old minimax 'get_best_move' usage.
     """
-    state_rep = game_state.get_state_representation()
+    state_rep = game_state.get_cnn_state_representation()
     valid_actions = game_state.get_valid_move_indices()
     if not valid_actions:
         return None  # No moves => checkmate or stalemate
@@ -520,4 +556,4 @@ def get_best_move(game_state, dqn_agent):
 
 # ========== 5) Training the Agent ==========
 if __name__ == "__main__":
-    dqn_agent.train(num_episodes=6000, random_fraction=0.3, minmax_depths_increment=2000)
+    dqn_agent.train(num_episodes=5000, random_fraction=1, minmax_depths_increment=1000)

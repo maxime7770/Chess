@@ -10,6 +10,7 @@ import pygame
 from pygame.locals import *
 from src import chess_engine
 from src.minmax_agent import get_best_move as get_best_move_minmax
+from src.mcts_agent import get_best_move as get_best_move_mcts
 from src.ql_agent import get_best_move as get_best_move_ql, DQNAgent
 import os
 import torch
@@ -60,9 +61,15 @@ def main():
     move_undone = False
 
     while running:
+        # for row in game_state.board:
+        #     print(" ".join(row))
+        # print()
+
         human_turn = (game_state.white_to_move and player_one) or (not game_state.white_to_move and player_two)
-        if not human_turn:
-            ai_move = get_best_move_ql(game_state, agent)
+        if not human_turn and not game_over:
+            #ai_move = get_best_move_ql(game_state, agent)
+            ai_move = get_best_move_mcts(game_state)
+            # ai_move = get_best_move_minmax(game_state, depth=1)
             game_state.make_move(ai_move)
             move_made = True
 
